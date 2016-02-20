@@ -10,14 +10,14 @@ import os
 data_dir ='/tmp/data/shakesphere'
 filename = '/tmp/data/shakesphere/input.txt'
 
-keep_probaties = np.arange(0.3,0.8,0.1) # hyper-parameter
+#keep_probaties = np.arange(0.3,0.8,0.1) # hyper-parameter
 
 
 class Model():
     
-    def __init__(self,infer= False, rnn_size = 256, batch_size=50, seq_length = 50, num_layers=2, 
+    def __init__(self,infer= False, rnn_size = 512, batch_size=50, seq_length = 50, num_layers=3, 
                  vocab_size = 300, grad_clip = 5, learning_rate = 0.02, 
-                 decay_rate = 0.95, num_epocs = 50, display_steps = 24):
+                 decay_rate = 0.95, num_epocs = 50, display_steps = 100):
         self.batch_size= batch_size
         self.seq_length = seq_length
         self.rnn_size = rnn_size 
@@ -59,8 +59,8 @@ class Model():
             
         lstm_cell = rnn_cell.BasicLSTMCell(self.rnn_size)
 
-        if self.is_training and self.keep_prob < 1:
-              lstm_cell = rnn_cell.DropoutWrapper(lstm_cell, output_keep_prob=self.keep_prob)
+#        if self.is_training and self.keep_prob < 1:
+#              lstm_cell = rnn_cell.DropoutWrapper(lstm_cell, output_keep_prob=self.keep_prob)
         
         multilayer_cell = rnn_cell.MultiRNNCell([lstm_cell] * self.num_layers)
         self.initial_state = multilayer_cell.zero_state(self.batch_size, tf.float32)    
@@ -96,7 +96,7 @@ class Model():
         self.probs = tf.nn.softmax(self.logits, name= "probability")
         
         loss = seq2seq.sequence_loss_by_example([self.logits], [tf.reshape(self.target_data, [-1])],  [tf.ones([self.batch_size * self.seq_length])], self.vocab_size )
-        self.cost = tf.reduce_sum(loss)
+        self.cost = tf.reduce_sum(loss) / ( self.batch_size * self.seq_length )
         
         self.final_state= states[-1]
         
@@ -124,28 +124,29 @@ class Model():
         with open(os.path.join('chars_vocab.pkl'), 'w') as f:
             cPickle.dump((self.data_loader.chars, self.data_loader.vocab), f)       
 
-        for prob in keep_probaties:
-            sess.run(tf.assign(self.keep_prob, prob))
-            for e in xrange(self.num_epocs):
-                sess.run(tf.assign(self.lr, self.learning_rate * (self.decay_rate ** e)))
-                self.data_loader.reset_batch_pointer()
-                
-                for b in xrange(self.data_loader.num_batches):
-                    x, y = self.data_loader.next_batch()
-                    #print "X:", x, "Y:", y
-                    feed ={self.input_data : x, self.target_data:y }
-                    effective_cost,state,_= sess.run([self.cost, self.final_state, self.train_op], feed_dict=feed)  
-                    if effective_cost < training_cost:            
-                        training_cost = effective_cost
-                        
-                    if (b % self.display_steps == 0):
-                        print " dropout_prob : ", prob,
-                        print " Epoch  :", e ,
-                        print " and Cost : ", effective_cost            
-                
-                if training_cost < trainingcost_lastepoch:
-                    trainingcost_lastepoch = training_cost
-                    saver.save(sess, 'model.ckpt')
+#        for prob in keep_probaties:
+#            sess.run(tf.assign(self.keep_prob, prob))
+        for e in xrange(self.num_epocs):
+            sess.run(tf.assign(self.lr, self.learning_rate * (self.decay_rate ** e)))
+            self.data_loader.reset_batch_pointer()
+            state = self.initial_state.eval(session = sess)
+            
+            for b in xrange(self.data_loader.num_batches):
+                x, y = self.data_loader.next_batch()
+                #print "X:", x, "Y:", y
+                feed ={self.input_data : x, self.target_data:y, self.initial_state:state }
+                effective_cost,state,_= sess.run([self.cost, self.final_state, self.train_op], feed_dict=feed)  
+                if effective_cost < training_cost:            
+                    training_cost = effective_cost
+                    
+                if (b % self.display_steps == 0):
+                    print " Batch Number: ", b, "/", self.data_loader.num_batches
+                    print " Epoch  :", e ,
+                    print " and Cost : ", effective_cost            
+            
+                    if training_cost < trainingcost_lastepoch:
+                        trainingcost_lastepoch = training_cost
+                        saver.save(sess, 'model.ckpt')
                     
                     
     def sample(self, num_of_samples, starting_text = 'The'):
